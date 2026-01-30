@@ -96,34 +96,122 @@ type LoadSessionStoreOptions = {
   skipCache?: boolean;
 };
 
+/**
+ * 加载会话存储
+ * 
+ * 这个函数负责从文件系统加载会话存储。
+ * 会话存储是一个 JSON 文件，包含所有会话的配置和历史。
+ * 
+ * 存储位置：
+ * - 默认：~/.clawdbot/sessions/sessions.json
+ * - 可以配置：config.session.store
+ * 
+ * 缓存机制：
+ * - 使用内存缓存提高性能
+ * - 缓存有效期：45 秒（可配置）
+ * - 检查文件修改时间，如果文件被修改，使缓存失效
+ * 
+ * 参数：
+ * - storePath: string - 存储文件路径
+ * - opts.skipCache?: boolean - 是否跳过缓存（默认 false）
+ * 
+ * 返回值：
+ * - Record<string, SessionEntry> - 会话存储对象
+ *   - key: 会话 Key（如 "main:test1"）
+ *   - value: 会话条目（包含历史、配置等）
+ * 
+ * TypeScript/JavaScript 知识点：
+ * - Record<K, V>: 对象类型，键类型 K，值类型 V
+ * - = {}: 默认参数值
+ * - try/catch: 错误处理
+ * - structuredClone: 深拷贝（防止修改影响缓存）
+ */
 export function loadSessionStore(
   storePath: string,
   opts: LoadSessionStoreOptions = {},
 ): Record<string, SessionEntry> {
-  // Check cache first if enabled
+  /**
+   * 步骤 1: 检查缓存
+   * 
+   * 如果缓存启用且有效，直接返回缓存的数据。
+   * 这可以避免频繁读取文件系统，提高性能。
+   */
   if (!opts.skipCache && isSessionStoreCacheEnabled()) {
     const cached = SESSION_STORE_CACHE.get(storePath);
     if (cached && isSessionStoreCacheValid(cached)) {
+      /**
+       * 检查文件修改时间
+       * 
+       * 如果文件被修改（mtime 不同），说明缓存已过期，需要重新加载
+       */
       const currentMtimeMs = getFileMtimeMs(storePath);
       if (currentMtimeMs === cached.mtimeMs) {
-        // Return a deep copy to prevent external mutations affecting cache
+        /**
+         * 返回深拷贝
+         * 
+         * 使用 structuredClone 创建深拷贝，防止外部修改影响缓存。
+         * 
+         * TypeScript/JavaScript 知识点：
+         * - structuredClone: 深拷贝函数（ES2022）
+         * - 深拷贝 vs 浅拷贝：
+         *   - 浅拷贝：只复制第一层，嵌套对象仍然共享
+         *   - 深拷贝：完全复制，包括所有嵌套对象
+         */
         return structuredClone(cached.store);
       }
+      /**
+       * 文件已修改，使缓存失效
+       */
       invalidateSessionStoreCache(storePath);
     }
   }
 
-  // Cache miss or disabled - load from disk
+  /**
+   * 步骤 2: 从磁盘加载
+   * 
+   * 缓存未命中或已禁用，从文件系统读取
+   */
   let store: Record<string, SessionEntry> = {};
   let mtimeMs = getFileMtimeMs(storePath);
+  
   try {
+    /**
+     * 读取文件内容
+     * 
+     * TypeScript/JavaScript 知识点：
+     * - fs.readFileSync: 同步读取文件
+     * - "utf-8": 文件编码
+     */
     const raw = fs.readFileSync(storePath, "utf-8");
+    
+    /**
+     * 解析 JSON5
+     * 
+     * JSON5 是 JSON 的扩展，支持注释、尾随逗号等。
+     * 使用 JSON5 可以让配置文件更易读。
+     */
     const parsed = JSON5.parse(raw);
+    
+    /**
+     * 验证解析结果
+     * 
+     * 确保解析出来的是正确的会话存储格式
+     */
     if (isSessionStoreRecord(parsed)) {
       store = parsed as Record<string, SessionEntry>;
     }
+    
+    /**
+     * 更新文件修改时间
+     */
     mtimeMs = getFileMtimeMs(storePath) ?? mtimeMs;
   } catch {
+    /**
+     * 忽略错误
+     * 
+     * 如果文件不存在或格式无效，使用空对象。
+     * 后续写入时会创建新文件。
+     */
     // ignore missing/invalid store; we'll recreate it
   }
 

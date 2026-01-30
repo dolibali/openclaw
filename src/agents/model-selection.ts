@@ -115,34 +115,98 @@ export function resolveModelRefFromString(params: {
   return { ref: parsed };
 }
 
+/**
+ * 解析配置的模型引用
+ * 
+ * 这个函数从配置中解析出要使用的模型。
+ * 
+ * 模型引用的格式：
+ * - "provider/model": 完整格式（如 "anthropic/claude-opus-4-5"）
+ * - "model": 只有模型名（会使用默认提供者，已弃用）
+ * - 别名: 配置中定义的别名
+ * 
+ * 参数：
+ * - params.cfg: MoltbotConfig - 配置
+ * - params.defaultProvider: string - 默认提供者（如 "anthropic"）
+ * - params.defaultModel: string - 默认模型（如 "claude-opus-4-5"）
+ * 
+ * 返回值：
+ * - ModelRef - 模型引用 { provider: string, model: string }
+ * 
+ * 执行流程：
+ * 1. 从配置中获取模型配置（可能是字符串或对象）
+ * 2. 如果是字符串，直接使用
+ * 3. 如果是对象，使用 primary 字段
+ * 4. 检查是否是别名
+ * 5. 解析模型引用
+ * 6. 如果没有配置，使用默认值
+ * 
+ * TypeScript/JavaScript 知识点：
+ * - as 类型断言：告诉 TypeScript 某个值的类型
+ * - typeof: 检查类型
+ * - 立即执行函数 (() => { ... })(): 用于复杂逻辑
+ */
 export function resolveConfiguredModelRef(params: {
   cfg: MoltbotConfig;
   defaultProvider: string;
   defaultModel: string;
 }): ModelRef {
+  /**
+   * 步骤 1: 从配置中提取模型配置
+   * 
+   * 配置可能是：
+   * - 字符串: "anthropic/claude-opus-4-5"
+   * - 对象: { primary: "anthropic/claude-opus-4-5", fallbacks: [...] }
+   * 
+   * TypeScript/JavaScript 知识点：
+   * - (() => { ... })(): 立即执行函数（IIFE）
+   * - as: 类型断言
+   * - typeof: 类型检查
+   */
   const rawModel = (() => {
     const raw = params.cfg.agents?.defaults?.model as { primary?: string } | string | undefined;
     if (typeof raw === "string") return raw.trim();
     return raw?.primary?.trim() ?? "";
   })();
+  
+  /**
+   * 步骤 2: 如果配置了模型，解析它
+   */
   if (rawModel) {
     const trimmed = rawModel.trim();
+    
+    /**
+     * 步骤 2.1: 构建别名索引
+     * 
+     * 别名允许用户使用简短的名称（如 "opus"）代替完整的模型 ID
+     */
     const aliasIndex = buildModelAliasIndex({
       cfg: params.cfg,
       defaultProvider: params.defaultProvider,
     });
+    
+    /**
+     * 步骤 2.2: 检查是否是别名（不包含 "/"）
+     */
     if (!trimmed.includes("/")) {
       const aliasKey = normalizeAliasKey(trimmed);
       const aliasMatch = aliasIndex.byAlias.get(aliasKey);
       if (aliasMatch) return aliasMatch.ref;
 
-      // Default to anthropic if no provider is specified, but warn as this is deprecated.
+      /**
+       * 步骤 2.3: 如果没有找到别名，且没有提供者，使用默认提供者（已弃用）
+       * 
+       * 这是为了向后兼容，但会显示警告
+       */
       console.warn(
         `[moltbot] Model "${trimmed}" specified without provider. Falling back to "anthropic/${trimmed}". Please use "anthropic/${trimmed}" in your config.`,
       );
       return { provider: "anthropic", model: trimmed };
     }
 
+    /**
+     * 步骤 2.4: 解析模型引用（格式：provider/model）
+     */
     const resolved = resolveModelRefFromString({
       raw: trimmed,
       defaultProvider: params.defaultProvider,
